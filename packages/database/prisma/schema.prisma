@@ -1,0 +1,570 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN_CONDOMINIO
+  ADMIN_FINANZAS
+  PORTERO
+  RESIDENTE
+  PROPIETARIO
+  INQUILINO
+}
+
+enum PaymentStatus {
+  PENDIENTE
+  PAGADO
+  VENCIDO
+  PARCIAL
+  CANCELADO
+}
+
+enum PaymentMethod {
+  TRANSFERENCIA
+  DEPOSITO
+  EFECTIVO
+  TARJETA
+  MERCADOPAGO
+  STRIPE
+}
+
+enum ExpenseCategory {
+  MANTENIMIENTO
+  SERVICIOS
+  SEGURIDAD
+  LIMPIEZA
+  AREAS_COMUNES
+  ADMINISTRACION
+  REPARACIONES
+  OTROS
+}
+
+enum NotificationType {
+  PAGO_PROXIMO
+  PAGO_VENCIDO
+  ASAMBLEA
+  AVISO_GENERAL
+  MANTENIMIENTO
+  SEGURIDAD
+  RESERVACION
+}
+
+enum ReservationStatus {
+  PENDIENTE
+  APROBADA
+  RECHAZADA
+  CANCELADA
+  COMPLETADA
+}
+
+enum AccessType {
+  ENTRADA
+  SALIDA
+  VISITA
+  DELIVERY
+  SERVICIO
+}
+
+enum UnitType {
+  DEPARTAMENTO
+  CASA
+  LOCAL_COMERCIAL
+  OFICINA
+  ESTACIONAMIENTO
+  BODEGA
+}
+
+enum UnitStatus {
+  DISPONIBLE
+  OCUPADA
+  MANTENIMIENTO
+}
+
+enum CondominiumStatus {
+  ACTIVO
+  INACTIVO
+  MANTENIMIENTO
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String?
+  name          String
+  lastName      String?
+  phone         String?
+  avatar        String?
+  emailVerified DateTime?
+  role          Role      @default(RESIDENTE)
+  isActive      Boolean   @default(true)
+  twoFactorEnabled Boolean @default(false)
+  twoFactorSecret String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts     Account[]
+  sessions     Session[]
+  units        UserUnit[]
+  payments     Payment[]
+  notifications Notification[]
+  reservations Reservation[]
+  accessLogs   AccessLog[]
+  auditLogs    AuditLog[]
+  ownedCondominiums Condominium[] @relation("CondominiumOwner")
+  adminCondominiums CondominiumAdmin[]
+  sentInvitations   UserInvitation[] @relation("InvitedBy")
+
+  @@index([email])
+  @@index([role])
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+enum InvitationStatus {
+  PENDIENTE
+  ACEPTADA
+  EXPIRADA
+  CANCELADA
+}
+
+model UserInvitation {
+  id            String           @id @default(cuid())
+  email         String
+  unitId        String?
+  role          Role             @default(RESIDENTE)
+  token         String           @unique
+  status        InvitationStatus @default(PENDIENTE)
+  invitedById   String
+  expiresAt     DateTime
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  unit          Unit?            @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  invitedBy     User             @relation("InvitedBy", fields: [invitedById], references: [id])
+
+  @@index([token])
+  @@index([email])
+  @@map("user_invitations")
+}
+
+model Condominium {
+  id              String              @id @default(cuid())
+  name            String
+  slug            String              @unique
+  address         String
+  city            String
+  state           String
+  country         String              @default("México")
+  zipCode         String?
+  phone           String?
+  email           String?
+  logo            String?
+  coverImage      String?
+  description     String?             @db.Text
+  totalUnits      Int                 @default(0)
+  status          CondominiumStatus   @default(ACTIVO)
+  settings        Json?
+  ownerId         String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  owner           User?               @relation("CondominiumOwner", fields: [ownerId], references: [id])
+  buildings       Building[]
+  units           Unit[]
+  admins          CondominiumAdmin[]
+  commonAreas     CommonArea[]
+  fees            Fee[]
+  expenses        Expense[]
+  providers       Provider[]
+  announcements   Announcement[]
+  assemblies      Assembly[]
+  settings2       CondominiumSetting[]
+
+  @@index([slug])
+  @@map("condominiums")
+}
+
+model CondominiumAdmin {
+  id             String   @id @default(cuid())
+  condominiumId  String
+  userId         String
+  role           Role     @default(ADMIN_CONDOMINIO)
+  permissions    Json?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  condominium    Condominium @relation(fields: [condominiumId], references: [id], onDelete: Cascade)
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([condominiumId, userId])
+  @@map("condominium_admins")
+}
+
+model Building {
+  id             String   @id @default(cuid())
+  condominiumId  String
+  name           String
+  floors         Int      @default(1)
+  unitsPerFloor  Int      @default(1)
+  hasElevator    Boolean  @default(false)
+  hasParking     Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  condominium    Condominium @relation(fields: [condominiumId], references: [id], onDelete: Cascade)
+  units          Unit[]
+
+  @@unique([condominiumId, name])
+  @@map("buildings")
+}
+
+model Unit {
+  id             String    @id @default(cuid())
+  condominiumId  String
+  buildingId     String?
+  unitNumber     String
+  unitType       UnitType  @default(DEPARTAMENTO)
+  status         UnitStatus @default(DISPONIBLE)
+  floor          Int?
+  area           Float?
+  bedrooms       Int?
+  bathrooms      Int?
+  parkingSpots   Int       @default(0)
+  ownershipPercentage Float?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  condominium    Condominium   @relation(fields: [condominiumId], references: [id], onDelete: Cascade)
+  building       Building?     @relation(fields: [buildingId], references: [id], onDelete: SetNull)
+  users          UserUnit[]
+  payments       Payment[]
+  reservations   Reservation[]
+  meters         Meter[]
+  invitations    UserInvitation[]
+
+  @@unique([condominiumId, unitNumber])
+  @@map("units")
+}
+
+model UserUnit {
+  id           String   @id @default(cuid())
+  userId       String
+  unitId       String
+  isOwner      Boolean  @default(false)
+  isResident   Boolean  @default(true)
+  isPrimary    Boolean  @default(false)
+  startDate    DateTime @default(now())
+  endDate      DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  unit         Unit     @relation(fields: [unitId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, unitId])
+  @@map("user_units")
+}
+
+model CommonArea {
+  id             String   @id @default(cuid())
+  condominiumId  String
+  name           String
+  description    String?  @db.Text
+  capacity       Int?
+  hourlyRate     Float?
+  isOpen         Boolean  @default(true)
+  isAtemporal    Boolean  @default(false)
+  schedule       Json?
+  images         String[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  condominium    Condominium   @relation(fields: [condominiumId], references: [id], onDelete: Cascade)
+  reservations   Reservation[]
+
+  @@map("common_areas")
+}
+
+model Reservation {
+  id             String            @id @default(cuid())
+  commonAreaId   String?
+  unitId         String
+  userId         String
+  title          String
+  description    String?
+  startDate      DateTime
+  endDate        DateTime
+  status         ReservationStatus @default(PENDIENTE)
+  totalAmount    Float?
+  depositAmount  Float?
+  isDepositPaid  Boolean           @default(false)
+  needsInsurance Boolean           @default(false)
+  notes          String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  commonArea     CommonArea?       @relation(fields: [commonAreaId], references: [id], onDelete: SetNull)
+  unit           Unit              @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([startDate, endDate])
+  @@map("reservations")
+}
+
+model Fee {
+  id              String        @id @default(cuid())
+  condominiumId   String
+  name            String
+  description     String?
+  amount          Float
+  currency        String        @default("MXN")
+  dueDay          Int           @default(1)
+  isActive        Boolean       @default(true)
+  isRecurring     Boolean       @default(true)
+  startDate       DateTime?
+  endDate         DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  condominium     Condominium   @relation(fields: [condominiumId], references: [id], onDelete: Cascade)
+  payments        Payment[]
+
+  @@map("fees")
+}
+
+model Payment {
+  id              String        @id @default(cuid())
+  feeId           String?
+  unitId          String
+  userId          String
+  amount          Float
+  amountPaid      Float         @default(0)
+  currency        String        @default("MXN")
+  status          PaymentStatus @default(PENDIENTE)
+  paymentMethod   PaymentMethod?
+  paymentDate     DateTime?
+  dueDate         DateTime
+  reference       String?
+  receiptUrl      String?
+  notes           String?
+  stripePaymentId String?
+  mercadoPagoId   String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  fee             Fee?          @relation(fields: [feeId], references: [id], onDelete: SetNull)
+  unit            Unit          @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, dueDate])
+  @@index([userId])
+  @@map("payments")
+}
+
+model Expense {
+  id              String          @id @default(cuid())
+  condominiumId   String
+  category        ExpenseCategory
+  description     String
+  amount          Float
+  currency        String          @default("MXN")
+  expenseDate     DateTime
+  receiptUrl      String?
+  providerId      String?
+  approvedBy      String?
+  notes           String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  condominium     Condominium     @relation(fields: [condominiumId], references: [id], onDelete: Cascade)
+
+  @@index([category, expenseDate])
+  @@map("expenses")
+}
+
+model Provider {
+  id              String   @id @default(cuid())
+  condominiumId   String
+  name            String
+  service         String
+  phone           String?
+  email           String?
+  address         String?
+  rfc             String?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  condominium     Condominium @relation(fields: [condominiumId], references: [id], onDelete: Cascade)
+
+  @@map("providers")
+}
+
+model Announcement {
+  id              String   @id @default(cuid())
+  condominiumId   String
+  title           String
+  content         String  @db.Text
+  isImportant     Boolean @default(false)
+  publishDate     DateTime @default(now())
+  expiryDate      DateTime?
+  images          String[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  condominium     Condominium @relation(fields: [condominiumId], references: [id], onDelete: Cascade)
+
+  @@index([publishDate])
+  @@map("announcements")
+}
+
+model Assembly {
+  id              String   @id @default(cuid())
+  condominiumId   String
+  title           String
+  description     String?  @db.Text
+  date            DateTime
+  location        String?
+  isVirtual       Boolean  @default(false)
+  virtualLink     String?
+  minutes         String?  @db.Text
+  status          String   @default("PROGRAMADA")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  condominium     Condominium @relation(fields: [condominiumId], references: [id], onDelete: Cascade)
+
+  @@map("assemblies")
+}
+
+model Notification {
+  id          String            @id @default(cuid())
+  userId      String
+  type        NotificationType
+  title       String
+  message     String
+  data        Json?
+  isRead      Boolean           @default(false)
+  readAt      DateTime?
+  createdAt   DateTime          @default(now())
+
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+model AccessLog {
+  id          String      @id @default(cuid())
+  unitId      String?
+  userId      String?
+  type        AccessType
+  personName  String?
+  personId    String?
+  vehiclePlate String?
+  vehicleModel String?
+  purpose     String?
+  entryTime   DateTime    @default(now())
+  exitTime    DateTime?
+  notes       String?
+  createdAt   DateTime    @default(now())
+
+  user        User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entryTime])
+  @@map("access_logs")
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  action      String
+  entity      String
+  entityId    String?
+  oldData     Json?
+  newData     Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model Meter {
+  id            String   @id @default(cuid())
+  unitId        String
+  type          String
+  meterNumber   String   @unique
+  reading       Float    @default(0)
+  readingDate   DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  unit          Unit     @relation(fields: [unitId], references: [id], onDelete: Cascade)
+
+  @@map("meters")
+}
+
+model CondominiumSetting {
+  id              String   @id @default(cuid())
+  condominiumId   String
+  key             String
+  value           Json
+  description     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  condominium     Condominium @relation(fields: [condominiumId], references: [id], onDelete: Cascade)
+
+  @@unique([condominiumId, key])
+  @@map("condominium_settings")
+}
